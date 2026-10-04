@@ -102,3 +102,16 @@ index 270ad977c..75e988b17 100644
      ChooseOfflineNameDialog dialog(tr("Please enter your desired username to add your offline account."), this);
      if (dialog.exec() != QDialog::Accepted) {
          return;
+diff --git a/launcher/Application.cpp b/launcher/Application.cpp
+index f30784542..665451d5e 100644
+--- a/launcher/Application.cpp
++++ b/launcher/Application.cpp
+@@ -1272,7 +1272,7 @@ bool Application::createSetupWizard()
+     bool pasteInterventionRequired = settings()->get("PastebinURL") != "";
+     bool validWidgets = m_themeManager->isValidApplicationTheme(settings()->get("ApplicationTheme").toString());
+     bool validIcons = m_themeManager->isValidIconTheme(settings()->get("IconTheme").toString());
+-    bool login = !m_accounts->anyAccountIsValid() && (capabilities().testAnyFlags(Application::SupportsMSA));
++    bool login = false;
+     bool themeInterventionRequired = !validWidgets || !validIcons;
+     bool wizardRequired = javaRequired || languageRequired || pasteInterventionRequired || themeInterventionRequired || askjava || login;
+     if (wizardRequired) {
