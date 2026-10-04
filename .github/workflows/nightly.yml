@@ -89,9 +89,11 @@ jobs:
         with:
           path: patches
 
-      - name: Apply offline-mode patch
+      - name: Apply source and CI patches
         shell: bash
-        run: git apply patches/.github/patches/offline-mode.patch
+        run: |
+          git apply patches/.github/patches/offline-mode.patch
+          git apply patches/.github/patches/qt-py7zr-workaround.patch
 
       - name: Setup dependencies
         id: setup-dependencies
