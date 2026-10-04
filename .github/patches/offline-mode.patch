@@ -84,3 +84,21 @@ index d52a2a14c..8e8644d23 100644
      LaunchDecision decision = decideLaunchMode();
      while (decision == LaunchDecision::Undecided) {
          decision = decideLaunchMode();
+diff --git a/launcher/ui/pages/global/AccountListPage.cpp b/launcher/ui/pages/global/AccountListPage.cpp
+index 270ad977c..75e988b17 100644
+--- a/launcher/ui/pages/global/AccountListPage.cpp
++++ b/launcher/ui/pages/global/AccountListPage.cpp
+@@ -141,13 +141,5 @@ void AccountListPage::on_actionAddMicrosoft_triggered()
+ void AccountListPage::on_actionAddOffline_triggered()
+ {
+-    if (!m_accounts->anyAccountIsValid()) {
+-        QMessageBox::warning(this, tr("Error"),
+-                             tr("You must add a Microsoft account that owns Minecraft before you can add an offline account."
+-                                "<br><br>"
+-                                "If you have lost your account you can contact Microsoft for support."));
+-        return;
+-    }
+-
+     ChooseOfflineNameDialog dialog(tr("Please enter your desired username to add your offline account."), this);
+     if (dialog.exec() != QDialog::Accepted) {
+         return;
