@@ -77,17 +77,17 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx-deployment-target }}
 
     steps:
-      - name: Checkout workflow and patch
-        uses: actions/checkout@v7
-        with:
-          path: patches
-
       - name: Checkout upstream Prism Launcher
         uses: actions/checkout@v7
         with:
           repository: PrismLauncher/PrismLauncher
           ref: develop
           submodules: true
+
+      - name: Checkout workflow and patch
+        uses: actions/checkout@v7
+        with:
+          path: patches
 
       - name: Apply offline-mode patch
         shell: bash
