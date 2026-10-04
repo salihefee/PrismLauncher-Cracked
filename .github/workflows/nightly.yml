@@ -67,8 +67,7 @@ jobs:
 
     defaults:
       run:
-        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
-        working-directory: source
+        shell: bash
 
     env:
       ARTIFACT_NAME: ${{ matrix.artifact-name }}-Qt6
@@ -89,15 +88,14 @@ jobs:
           repository: PrismLauncher/PrismLauncher
           ref: develop
           submodules: true
-          path: source
 
       - name: Apply offline-mode patch
-        working-directory: source
-        run: git apply ../patches/.github/patches/offline-mode.patch
+        shell: bash
+        run: git apply patches/.github/patches/offline-mode.patch
 
       - name: Setup dependencies
         id: setup-dependencies
-        uses: ./source/.github/actions/setup-dependencies
+        uses: ./.github/actions/setup-dependencies
         with:
           build-type: ${{ env.BUILD_TYPE }}
           artifact-name: ${{ matrix.artifact-name }}
@@ -106,12 +104,15 @@ jobs:
           qt-version: ${{ matrix.qt-version }}
 
       - name: Configure project
+        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         run: cmake --preset "$CMAKE_PRESET" -D VCPKG_HOST_TRIPLET="$VCPKG_TRIPLET" -D VCPKG_TARGET_TRIPLET="$VCPKG_TRIPLET"
 
       - name: Run build
+        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         run: cmake --build --preset "$CMAKE_PRESET" --config "$BUILD_TYPE"
 
       - name: Run tests
+        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         env:
           MSYS2_PATH_TYPE: inherit
         run: ctest --preset "$CMAKE_PRESET" --build-config "$BUILD_TYPE"
@@ -123,7 +124,7 @@ jobs:
 
       - name: Package (Linux)
         if: ${{ runner.os == 'Linux' }}
-        uses: ./source/.github/actions/package/linux
+        uses: ./.github/actions/package/linux
         with:
           version: ${{ steps.short-version.outputs.version }}
           build-type: ${{ steps.setup-dependencies.outputs.build-type }}
@@ -132,7 +133,7 @@ jobs:
 
       - name: Package (macOS)
         if: ${{ runner.os == 'macOS' }}
-        uses: ./source/.github/actions/package/macos
+        uses: ./.github/actions/package/macos
         with:
           version: ${{ steps.short-version.outputs.version }}
           build-type: ${{ steps.setup-dependencies.outputs.build-type }}
@@ -140,7 +141,7 @@ jobs:
 
       - name: Package (Windows)
         if: ${{ runner.os == 'Windows' }}
-        uses: ./source/.github/actions/package/windows
+        uses: ./.github/actions/package/windows
         env:
           CI_HAS_ACCESS_TO_AZURE: ${{ vars.CI_HAS_ACCESS_TO_AZURE || '' }}
         with:
