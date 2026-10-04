@@ -1,7 +1,16 @@
 diff --git a/.github/actions/setup-dependencies/action.yml b/.github/actions/setup-dependencies/action.yml
 --- a/.github/actions/setup-dependencies/action.yml
 +++ b/.github/actions/setup-dependencies/action.yml
-@@ -124,7 +124,8 @@ runs:
+@@ -122,9 +122,17 @@ runs:
++    - name: Limit aqt extraction concurrency on Windows
++      if: ${{ runner.os == 'Windows' }}
++      shell: pwsh
++      run: |
++        Set-Content -Path "$env:RUNNER_TEMP\aqt.ini" -Value "[aqt]`nconcurrency: 1"
++        "AQT_CONFIG=$env:RUNNER_TEMP\aqt.ini" >> $env:GITHUB_ENV
++
+     - name: Install Qt
+       uses: jurplel/install-qt-action@v4
        with:
          version: ${{ inputs.qt-version }}
          setup-python: false
