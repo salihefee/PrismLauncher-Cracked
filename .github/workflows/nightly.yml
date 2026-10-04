@@ -11,14 +11,94 @@ on:
     inputs:
       build-type:
         description: Type of build (Debug or Release)
-        type: string
+        type: choice
+        options:
+          - Release
+          - Debug
         default: Release
+      linux_x64:
+        description: Linux x86-64
+        type: boolean
+        default: true
+      linux_arm64:
+        description: Linux ARM64
+        type: boolean
+        default: true
+      windows_mingw_x64:
+        description: Windows x86-64 (MinGW)
+        type: boolean
+        default: true
+      windows_msvc_x64:
+        description: Windows x86-64 (MSVC)
+        type: boolean
+        default: true
+      windows_msvc_arm64:
+        description: Windows ARM64 (MSVC)
+        type: boolean
+        default: true
+      macos_universal:
+        description: macOS universal
+        type: boolean
+        default: true
 
 permissions: {}
 
 jobs:
+  select-platforms:
+    name: Select build platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Generate matrix
+        id: matrix
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LINUX_X64: ${{ inputs.linux_x64 }}
+          LINUX_ARM64: ${{ inputs.linux_arm64 }}
+          WINDOWS_MINGW_X64: ${{ inputs.windows_mingw_x64 }}
+          WINDOWS_MSVC_X64: ${{ inputs.windows_msvc_x64 }}
+          WINDOWS_MSVC_ARM64: ${{ inputs.windows_msvc_arm64 }}
+          MACOS_UNIVERSAL: ${{ inputs.macos_universal }}
+        run: |
+          entries='[]'
+
+          selected() {
+            [[ "$EVENT_NAME" == 'schedule' || "$1" == 'true' ]]
+          }
+
+          if selected "$LINUX_X64"; then
+            entries=$(jq -c '. + [{"os":"ubuntu-24.04","artifact-name":"Linux","cmake-preset":"linux","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+          if selected "$LINUX_ARM64"; then
+            entries=$(jq -c '. + [{"os":"ubuntu-24.04-arm","artifact-name":"Linux-aarch64","cmake-preset":"linux","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+          if selected "$WINDOWS_MINGW_X64"; then
+            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MinGW-w64","cmake-preset":"windows_mingw","msystem":"CLANG64","vcvars-arch":"amd64_x86","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+          if selected "$WINDOWS_MSVC_X64"; then
+            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MSVC","cmake-preset":"windows_msvc","msystem":"","vcvars-arch":"amd64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+          if selected "$WINDOWS_MSVC_ARM64"; then
+            entries=$(jq -c '. + [{"os":"windows-11-arm","artifact-name":"Windows-MSVC-arm64","cmake-preset":"windows_msvc","msystem":"","vcvars-arch":"arm64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+          if selected "$MACOS_UNIVERSAL"; then
+            entries=$(jq -c '. + [{"os":"macos-26","artifact-name":"macOS","cmake-preset":"macos_universal","msystem":"","vcvars-arch":"","macosx-deployment-target":"13.0","qt-version":"6.11.2"}]' <<< "$entries")
+          fi
+
+          if [[ "$entries" == '[]' ]]; then
+            echo '::error::Select at least one build platform.'
+            exit 1
+          fi
+
+          matrix=$(jq -cn --argjson include "$entries" '{include:$include}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.artifact-name }})
+    needs: select-platforms
 
     permissions:
       contents: read
@@ -26,42 +106,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact-name: Linux
-            cmake-preset: linux
-            qt-version: 6.11.2
-
-          - os: ubuntu-24.04-arm
-            artifact-name: Linux-aarch64
-            cmake-preset: linux
-            qt-version: 6.11.2
-
-          - os: windows-2022
-            artifact-name: Windows-MinGW-w64
-            cmake-preset: windows_mingw
-            msystem: CLANG64
-            vcvars-arch: amd64_x86
-            qt-version: 6.11.2
-
-          - os: windows-2022
-            artifact-name: Windows-MSVC
-            cmake-preset: windows_msvc
-            vcvars-arch: amd64
-            qt-version: 6.11.2
-
-          - os: windows-11-arm
-            artifact-name: Windows-MSVC-arm64
-            cmake-preset: windows_msvc
-            vcvars-arch: arm64
-            qt-version: 6.11.2
-
-          - os: macos-26
-            artifact-name: macOS
-            cmake-preset: macos_universal
-            macosx-deployment-target: 13.0
-            qt-version: 6.11.2
+      matrix: ${{ fromJSON(needs.select-platforms.outputs.matrix) }}
 
     runs-on: ${{ matrix.os }}
 
