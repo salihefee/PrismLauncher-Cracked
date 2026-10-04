@@ -93,6 +93,13 @@ jobs:
         shell: bash
         run: git apply patches/.github/patches/offline-mode.patch
 
+      - name: Bootstrap MSYS2 shell
+        if: ${{ runner.os == 'Windows' && matrix.msystem != '' }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+
       - name: Setup dependencies
         id: setup-dependencies
         uses: ./.github/actions/setup-dependencies
@@ -104,15 +111,12 @@ jobs:
           qt-version: ${{ matrix.qt-version }}
 
       - name: Configure project
-        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         run: cmake --preset "$CMAKE_PRESET" -D VCPKG_HOST_TRIPLET="$VCPKG_TRIPLET" -D VCPKG_TARGET_TRIPLET="$VCPKG_TRIPLET"
 
       - name: Run build
-        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         run: cmake --build --preset "$CMAKE_PRESET" --config "$BUILD_TYPE"
 
       - name: Run tests
-        shell: ${{ matrix.msystem != '' && 'msys2 {0}' || 'bash' }}
         env:
           MSYS2_PATH_TYPE: inherit
         run: ctest --preset "$CMAKE_PRESET" --build-config "$BUILD_TYPE"
