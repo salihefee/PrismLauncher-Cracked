@@ -93,13 +93,6 @@ jobs:
         shell: bash
         run: git apply patches/.github/patches/offline-mode.patch
 
-      - name: Bootstrap MSYS2 shell
-        if: ${{ runner.os == 'Windows' && matrix.msystem != '' }}
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-
       - name: Setup dependencies
         id: setup-dependencies
         uses: ./.github/actions/setup-dependencies
