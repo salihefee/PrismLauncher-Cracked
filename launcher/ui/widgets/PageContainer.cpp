@@ -77,9 +77,7 @@ class PageEntryFilterModel : public QSortFilterProxyModel {
 };
 
 PageContainer::PageContainer(BasePageProvider* pageProvider, QString defaultId, QWidget* parent)
-    : QWidget(parent)
-    , m_proxyModel(new PageEntryFilterModel(this))
-    , m_model(new PageModel(this))
+    : QWidget(parent), m_proxyModel(new PageEntryFilterModel(this)), m_model(new PageModel(this))
 {
     createUI();
     useSidebarStyle(true);
@@ -93,11 +91,6 @@ PageContainer::PageContainer(BasePageProvider* pageProvider, QString defaultId, 
         page->listIndex = counter;
         page->setParentContainer(this);
         counter++;
-        page->updateExtraInfo = [this](const QString& id, const QString& info) {
-            if (m_currentPage && id == m_currentPage->id()) {
-                m_header->setText(m_currentPage->displayName() + info);
-            }
-        };
     }
     m_model->setPages(pages);
 
@@ -176,8 +169,6 @@ void PageContainer::createUI()
     m_header->setFont(headerLabelFont);
 
     auto* headerHLayout = new QHBoxLayout;
-    const int leftMargin = APPLICATION->style()->pixelMetric(QStyle::PM_LayoutLeftMargin);
-    headerHLayout->addSpacerItem(new QSpacerItem(leftMargin, 0, QSizePolicy::Fixed, QSizePolicy::Ignored));
     headerHLayout->addWidget(m_header);
     headerHLayout->setContentsMargins(0, 6, 0, 0);
 
@@ -253,6 +244,8 @@ void PageContainer::help()
 void PageContainer::currentChanged(const QModelIndex& current)
 {
     int selectedIndex = current.isValid() ? m_proxyModel->mapToSource(current).row() : -1;
+
+    Q_ASSERT(selectedIndex < m_model->pages().size() && selectedIndex >= 0);
 
     auto* selected = m_model->pages().at(selectedIndex);
     auto* previous = m_currentPage;

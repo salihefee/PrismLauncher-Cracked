@@ -153,7 +153,7 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelI
             m_current->versionsLoaded = versionsLoaded;
 
             QVariant currentUpdated;
-            currentUpdated.setValue(response);
+            currentUpdated.setValue(m_current);
 
             if (!m_model->setData(curr, currentUpdated, Qt::UserRole)) {
                 qWarning() << "Failed to cache extra info for the current pack!";
@@ -219,7 +219,7 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelI
 
     } else {
         for (const auto& version : m_current->versions) {
-            if (!version.version.contains(version.version)) {
+            if (!version.version.contains(version.versionNumber)) {
                 m_ui->versionSelectionBox->addItem(QString("%1 - %2").arg(version.version, version.versionNumber),
                                                    QVariant(version.fileId));
             } else {

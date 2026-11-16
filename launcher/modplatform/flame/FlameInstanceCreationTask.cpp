@@ -188,10 +188,7 @@ void FlameCreationTask::executeTask()
 
                     oldFiles.remove(file.key());
                     filesIterator = files.erase(filesIterator);
-
-                    if (filesIterator != files.begin()) {
-                        filesIterator--;
-                    }
+                    continue;
                 }
             }
 
@@ -215,26 +212,25 @@ void FlameCreationTask::executeTask()
             fileIds.append(QString::number(file.fileId));
         }
 
+        if (fileIds.isEmpty()) {
+            createInst();
+            return;
+        }
+
         auto [job, rawResponse] = FlameAPI::getFiles(fileIds);
 
         connect(job.get(), &Task::succeeded, this,
                 [this, rawResponse, fileIds, oldInstDir, oldFiles, oldMinecraftDir, createInst]() mutable {
                     // Parse the API response
-                    auto doc = Json::requireObject(*rawResponse).and_then([fileIds](const auto& v) -> Result<QJsonArray> {
-                        if (fileIds.size() == 1) {
-                            TRY_INTO(const auto& obj, Json::requireObject(v, "data", "data"))
-                            return { { obj } };
-                        }
-                        return Json::requireArray(v, "data");
-                    });
-                    if (!doc) {
-                        qWarning() << "Error while parsing JSON response from Flame files task:" << doc.error();
-                        qWarning() << *rawResponse;
-                        return;
-                    }
+                    auto process = [&] -> Result<> {
+                        TRY_INTO(auto doc, Json::requireObject(*rawResponse).and_then([fileIds](const auto& v) -> Result<QJsonArray> {
+                            if (fileIds.size() == 1 && v["data"].isObject()) {
+                                return { { v["data"].toObject() } };
+                            }
+                            return Json::requireArray(v, "data");
+                        }))
 
-                    for (auto entry : doc.value()) {
-                        auto parse = [&entry, &oldFiles] -> Result<> {
+                        for (auto entry : doc) {
                             TRY_INTO(const auto& entryObj, Json::requireObject(entry))
 
                             Flame::File file;
@@ -242,22 +238,25 @@ void FlameCreationTask::executeTask()
                             TRY_INTO(file.version, FlameMod::loadIndexedPackVersion(entryObj))
                             TRY_INTO(const auto& id, Json::requireInteger(entryObj, "id"))
                             oldFiles.insert(id, file);
-                            return {};
-                        };
-                        if (auto res = parse(); !res) {
-                            qCritical() << res.error();
-                            break;
-                        }
-                    }
-
-                    // Delete the files
-                    for (const auto& file : oldFiles) {
-                        if (file.version.fileName.isEmpty() || file.targetFolder.isEmpty()) {
-                            continue;
                         }
 
-                        const QString relativePath(FS::PathCombine(file.targetFolder, file.version.fileName));
-                        scheduleToDelete(m_parent, oldMinecraftDir, relativePath, true);
+                        // Delete the files
+                        for (const auto& file : oldFiles) {
+                            if (file.version.fileName.isEmpty() || file.targetFolder.isEmpty()) {
+                                continue;
+                            }
+
+                            const QString relativePath(FS::PathCombine(file.targetFolder, file.version.fileName));
+                            scheduleToDelete(m_parent, oldMinecraftDir, relativePath, true);
+                        }
+
+                        createInst();
+                        return {};
+                    };
+
+                    if (const auto result = process(); !result) {
+                        emitFailed(tr("Failed to parse fetched old files: %1").arg(result.error()));
+                        return;
                     }
 
                     createInst();
@@ -626,11 +625,17 @@ void FlameCreationTask::setupDownloadJob()
         }
 
         relpath = FS::PathCombine(m_rootPath, relpath);
-        auto path = FS::PathCombine(m_stagingPath, relpath);
+        auto path = FS::getSafePathInRoot(m_stagingPath, relpath);
+        if (!path) {
+            emitFailed(tr("The modpack is trying to download a file outside of the instance folder (%1). This is a security risk and isn't "
+                          "allowed.")
+                           .arg(relpath));
+            return;
+        }
 
         if (!result.version.downloadUrl.isEmpty()) {
-            qDebug() << "Will download" << result.version.downloadUrl << "to" << path;
-            auto dl = Net::ApiRequest::makeFile(result.version.downloadUrl, path);
+            qDebug() << "Will download" << result.version.downloadUrl << "to" << *path;
+            auto dl = Net::ApiRequest::makeFile(result.version.downloadUrl, *path);
             m_filesJob->addNetAction(dl);
         }
     }

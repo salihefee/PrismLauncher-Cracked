@@ -68,6 +68,7 @@
 #include <QProgressDialog>
 #include <QShortcut>
 #include <QStatusBar>
+#include <QTextEdit>
 #include <QToolBar>
 #include <QToolButton>
 #include <QWidget>
@@ -92,8 +93,6 @@
 #include <updater/ExternalUpdater.h>
 #include "InstanceWindow.h"
 
-#include "ui/GuiUtil.h"
-#include "ui/ViewLogWindow.h"
 #include "ui/dialogs/AboutDialog.h"
 #include "ui/dialogs/CopyInstanceDialog.h"
 #include "ui/dialogs/CreateShortcutDialog.h"
@@ -111,7 +110,7 @@
 #include "ui/instanceview/InstanceView.h"
 #include "ui/themes/ITheme.h"
 #include "ui/themes/ThemeManager.h"
-#include "ui/widgets/LabeledToolButton.h"
+#include "ui/widgets/EditableLabel.h"
 
 #include "minecraft/PackProfile.h"
 #include "minecraft/VersionFile.h"
@@ -159,27 +158,52 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // instance toolbar stuff
     {
-        // Qt doesn't like vertical moving toolbars, so we have to force them...
-        // See https://github.com/PolyMC/PolyMC/issues/493
-        connect(ui->instanceToolBar, &QToolBar::orientationChanged, this,
-                [this](Qt::Orientation) { ui->instanceToolBar->setOrientation(Qt::Vertical); });
+        connect(ui->instanceToolBar, &QToolBar::orientationChanged, this, &MainWindow::updateInstanceToolBarOrientation);
+
+        // FIXME: why doesn't this work when done in the UI file?
+        ui->instanceToolBar->setMinimumWidth(140);
 
         // if you try to add a widget to a toolbar in a .ui file
         // qt designer will delete it when you save the file >:(
-        changeIconButton = new LabeledToolButton(this);
-        changeIconButton->setObjectName(QStringLiteral("changeIconButton"));
-        changeIconButton->setIcon(QIcon::fromTheme("news"));
-        changeIconButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        connect(changeIconButton, &QToolButton::clicked, this, &MainWindow::on_actionChangeInstIcon_triggered);
-        ui->instanceToolBar->insertWidgetBefore(ui->actionLaunchInstance, changeIconButton);
+        // HACK: the toolbar interferes with the sizing for some reason
+        auto* infoWidget = new QWidget(this);
+        auto* infoLayout = new QVBoxLayout(infoWidget);
+        infoLayout->setContentsMargins(2, 0, 2, 0);
 
-        renameButton = new LabeledToolButton(this);
-        renameButton->setObjectName(QStringLiteral("renameButton"));
-        renameButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        connect(renameButton, &QToolButton::clicked, this, &MainWindow::on_actionRenameInstance_triggered);
-        ui->instanceToolBar->insertWidgetBefore(ui->actionLaunchInstance, renameButton);
+        m_changeIconButton = new QToolButton(infoWidget);
+        m_changeIconButton->setObjectName(QStringLiteral("changeIconButton"));
+        m_changeIconButton->setIconSize({ ui->instanceToolBar->minimumWidth(), 80 });
+        m_changeIconButton->setAutoRaise(true);
+        updateInstanceToolIcon("default");
+        m_changeIconButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        connect(m_changeIconButton, &QToolButton::clicked, this, &MainWindow::on_actionChangeInstIcon_triggered);
+        infoLayout->addWidget(m_changeIconButton);
 
-        ui->instanceToolBar->insertSeparator(ui->actionLaunchInstance);
+        m_nameLabel = new EditableLabel(infoWidget);
+        m_nameLabel->setObjectName(QStringLiteral("nameLabel"));
+        m_nameLabel->setText(tr("No Instance Selected"));
+        connect(m_nameLabel, &EditableLabel::textChanged, this, [this](const QString& newName) {
+            if (m_selectedInstance == nullptr) {
+                return;
+            }
+            auto* instances = APPLICATION->instances();
+            const auto oldName = m_selectedInstance->name();
+            const bool ok = instances->setData(instances->index(instances->getInstIndex(m_selectedInstance)), newName, Qt::EditRole);
+            if (!ok) {
+                m_nameLabel->setText(m_selectedInstance->name());
+                return;
+            }
+
+            handleInstanceRename(oldName, m_selectedInstance->name());
+            m_nameLabel->setText(m_selectedInstance->name());
+        });
+
+        infoLayout->addWidget(m_nameLabel);
+
+        m_instanceInfoWidget = ui->instanceToolBar->insertWidgetBefore(ui->actionLaunchInstance, infoWidget);
+        Q_ASSERT(m_instanceInfoWidget != nullptr);
+
+        m_instanceToolBarTopSeparator = ui->instanceToolBar->insertSeparator(ui->actionLaunchInstance);
     }
 
     // set the menu for the folders help, accounts, and export tool buttons
@@ -213,7 +237,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
         ui->actionCheckUpdate->setVisible(APPLICATION->updaterEnabled());
 
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
         ui->actionAddToPATH->setVisible(false);
 #endif
 
@@ -291,22 +315,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         view->setFrameShape(QFrame::NoFrame);
         // do not show ugly blue border on the mac
         view->setAttribute(Qt::WA_MacShowFocusRect, false);
-        connect(delegate, &ListViewDelegate::textChanged, this, [this](QString before, QString after) {
-            if (auto newRoot = askToUpdateInstanceDirName(m_selectedInstance, before, after, this); !newRoot.isEmpty()) {
-                auto oldID = m_selectedInstance->id();
-                auto newID = QFileInfo(newRoot).fileName();
-                QString origGroup(APPLICATION->instances()->getInstanceGroup(oldID));
-                bool syncGroup = origGroup != GroupId() && oldID != newID;
-                if (syncGroup)
-                    APPLICATION->instances()->setInstanceGroup(oldID, GroupId());
-
-                refreshInstances();
-                setSelectedInstanceById(newID);
-
-                if (syncGroup)
-                    APPLICATION->instances()->setInstanceGroup(newID, origGroup);
-            }
-        });
+        connect(delegate, &ListViewDelegate::textChanged, this, &MainWindow::handleInstanceRename);
 
         view->installEventFilter(this);
         view->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -328,6 +337,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     {
         // set the cat action priority here so you can still see the action in qt designer
         ui->actionCAT->setPriority(QAction::LowPriority);
+        m_catSeparator = ui->mainToolBar->insertSeparator(ui->actionCAT);
         updateCatState();
         connect(ui->actionCAT, &QAction::toggled, this, &MainWindow::onCatToggled);
         connect(APPLICATION, &Application::currentCatChanged, this, &MainWindow::onCatChanged);
@@ -357,9 +367,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // track icon changes and update the toolbar!
     connect(APPLICATION->icons(), &IconList::iconUpdated, this, &MainWindow::iconUpdated);
 
-    // model reset -> selection is invalid. All the instance pointers are wrong.
-    connect(APPLICATION->instances(), &InstanceList::dataIsInvalid, this, &MainWindow::selectionBad);
-
     // handle newly added instances
     connect(APPLICATION->instances(), &InstanceList::instanceSelectRequest, this, &MainWindow::instanceSelectRequest);
 
@@ -380,6 +387,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->accountsMenu->setStyleSheet("QMenu { menu-scrollable: 1; }");
 
     repopulateAccountsMenu();
+    connect(ui->actionNoDefaultAccount, &QAction::triggered, this, &MainWindow::changeActiveAccount);
 
     // Update the menu when the active account changes.
     // Shouldn't have to use lambdas here like this, but if I don't, the compiler throws a fit.
@@ -426,7 +434,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
 // macOS always has a native menu bar, so these fixes are not applicable
 // Other systems may or may not have a native menu bar (most do not - it seems like only Ubuntu Unity does)
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
 void MainWindow::keyReleaseEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_Alt && !APPLICATION->settings()->get("MenuBarInsteadOfToolBar").toBool())
@@ -442,6 +450,7 @@ void MainWindow::retranslateUi()
         m_statusLeft->setText(m_selectedInstance->getStatusbarDescription());
     } else {
         m_statusLeft->setText(tr("No instance selected"));
+        m_nameLabel->setText(tr("No Instance Selected"));
     }
 
     ui->retranslateUi(this);
@@ -452,8 +461,7 @@ void MainWindow::retranslateUi()
         ui->actionAccountsButton->setText(profileLabel);
     }
 
-    changeIconButton->setToolTip(ui->actionChangeInstIcon->toolTip());
-    renameButton->setToolTip(ui->actionRenameInstance->toolTip());
+    m_changeIconButton->setToolTip(ui->actionChangeInstIcon->toolTip());
 
     // replace the %1 with the launcher display name in some actions
     if (helpMenuButton->toolTip().contains("%1"))
@@ -517,9 +525,11 @@ void MainWindow::konamiTriggered()
 
 void MainWindow::showInstanceContextMenu(const QPoint& pos)
 {
+    auto* menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
     QList<QAction*> actions;
 
-    QAction* actionSep = new QAction("", this);
+    auto* actionSep = new QAction("", menu);
     actionSep->setSeparator(true);
 
     bool onInstance = view->indexAt(pos).isValid();
@@ -537,21 +547,21 @@ void MainWindow::showInstanceContextMenu(const QPoint& pos)
 
         // add header
         actions.prepend(actionSep);
-        QAction* actionVoid = new QAction(m_selectedInstance->name(), this);
+        auto* actionVoid = new QAction(m_selectedInstance->name(), menu);
         actionVoid->setEnabled(false);
         actions.prepend(actionVoid);
     } else {
         auto group = view->groupNameAt(pos);
 
-        QAction* actionVoid = new QAction(group.isNull() ? BuildConfig.LAUNCHER_DISPLAYNAME : group, this);
+        auto* actionVoid = new QAction(group.isNull() ? BuildConfig.LAUNCHER_DISPLAYNAME : group, menu);
         actionVoid->setEnabled(false);
 
-        QAction* actionCreateInstance = new QAction(tr("&Create instance"), this);
+        auto* actionCreateInstance = new QAction(tr("&Create instance"), menu);
         actionCreateInstance->setToolTip(ui->actionAddInstance->toolTip());
         if (!group.isNull()) {
-            QVariantMap instance_action_data;
-            instance_action_data["group"] = group;
-            actionCreateInstance->setData(instance_action_data);
+            QVariantMap instanceActionData;
+            instanceActionData["group"] = group;
+            actionCreateInstance->setData(instanceActionData);
         }
 
         connect(actionCreateInstance, &QAction::triggered, this, &MainWindow::on_actionAddInstance_triggered);
@@ -560,22 +570,27 @@ void MainWindow::showInstanceContextMenu(const QPoint& pos)
         actions.prepend(actionVoid);
         actions.append(actionCreateInstance);
         if (!group.isNull()) {
-            QAction* actionDeleteGroup = new QAction(tr("&Delete group"), this);
+            auto* actionDeleteGroup = new QAction(tr("&Delete group"), menu);
             connect(actionDeleteGroup, &QAction::triggered, this, [this, group] { deleteGroup(group); });
             actions.append(actionDeleteGroup);
 
-            QAction* actionRenameGroup = new QAction(tr("&Rename group"), this);
+            auto* actionRenameGroup = new QAction(tr("&Rename group"), menu);
             connect(actionRenameGroup, &QAction::triggered, this, [this, group] { renameGroup(group); });
             actions.append(actionRenameGroup);
+
+            QAction* actionChangeGroupIcon = new QAction(tr("Change group &icon"), this);
+            connect(actionChangeGroupIcon, &QAction::triggered, this, [this, group] { setGroupIcon(group); });
+            actions.append(actionChangeGroupIcon);
+
+            if (!APPLICATION->instances()->getGroupIconKey(group).isEmpty()) {
+                QAction* actionRemoveGroupIcon = new QAction(tr("Delete &group icon"), this);
+                connect(actionRemoveGroupIcon, &QAction::triggered, this, [this, group] { removeGroupIcon(group); });
+                actions.append(actionRemoveGroupIcon);
+            }
         }
     }
-    QMenu myMenu;
-    myMenu.addActions(actions);
-    /*
-    if (onInstance)
-        myMenu.setEnabled(m_selectedInstance->canLaunch());
-    */
-    myMenu.exec(view->mapToGlobal(pos));
+    menu->addActions(actions);
+    menu->popup(view->mapToGlobal(pos));
 }
 
 void MainWindow::updateMainToolBar()
@@ -598,31 +613,31 @@ void MainWindow::updateLaunchButton()
 
 void MainWindow::updateThemeMenu()
 {
-    QMenu* themeMenu = ui->actionChangeTheme->menu();
+    auto* themeMenu = ui->actionChangeTheme->menu();
 
     if (themeMenu) {
-        themeMenu->clear();
-    } else {
-        themeMenu = new QMenu(this);
+        themeMenu->deleteLater();
     }
+    themeMenu = new QMenu(this);
 
     auto themes = APPLICATION->themeManager()->getValidApplicationThemes();
 
-    QActionGroup* themesGroup = new QActionGroup(this);
-
+    auto currentThemeID = APPLICATION->settings()->get("ApplicationTheme").toString();
     for (auto* theme : themes) {
-        QAction* themeAction = themeMenu->addAction(theme->name());
+        auto* themeAction = new QAction(theme->name(), themeMenu);
 
         themeAction->setCheckable(true);
-        if (APPLICATION->settings()->get("ApplicationTheme").toString() == theme->id()) {
-            themeAction->setChecked(true);
-        }
-        themeAction->setActionGroup(themesGroup);
+        themeAction->setChecked(currentThemeID == theme->id());
+        themeAction->setData(theme->id());
 
-        connect(themeAction, &QAction::triggered, APPLICATION, [theme]() {
-            APPLICATION->themeManager()->setApplicationTheme(theme->id());
-            APPLICATION->settings()->set("ApplicationTheme", theme->id());
+        connect(themeAction, &QAction::triggered, APPLICATION, [id = theme->id(), themeMenu]() {
+            APPLICATION->themeManager()->setApplicationTheme(id);
+            APPLICATION->settings()->set("ApplicationTheme", id);
+            for (auto* a : themeMenu->actions()) {
+                a->setChecked(a->data().toString() == id);
+            }
         });
+        themeMenu->addAction(themeAction);
     }
 
     ui->actionChangeTheme->setMenu(themeMenu);
@@ -635,19 +650,18 @@ void MainWindow::repopulateAccountsMenu()
     // NOTE: this is done so the accounts button text is not set to the accounts menu title
     QMenu* accountsButtonMenu = ui->actionAccountsButton->menu();
     if (accountsButtonMenu) {
-        accountsButtonMenu->clear();
-    } else {
-        accountsButtonMenu = new QMenu(this);
-        ui->actionAccountsButton->setMenu(accountsButtonMenu);
+        accountsButtonMenu->deleteLater();
     }
+    accountsButtonMenu = new QMenu(this);
+    ui->actionAccountsButton->setMenu(accountsButtonMenu);
 
-    auto accounts = APPLICATION->accounts();
-    MinecraftAccountPtr defaultAccount = accounts->defaultAccount();
+    auto* accounts = APPLICATION->accounts();
+    auto defaultAccount = accounts->defaultAccount();
 
     bool canChangeSkin = defaultAccount && (defaultAccount->accountType() == AccountType::MSA) && !defaultAccount->isActive();
     ui->actionManageSkins->setEnabled(canChangeSkin);
 
-    QString active_profileId = "";
+    QString activeProfileId = "";
     if (defaultAccount) {
         // this can be called before accountMenuButton exists
         if (ui->actionAccountsButton) {
@@ -656,7 +670,7 @@ void MainWindow::repopulateAccountsMenu()
         }
     }
 
-    QActionGroup* accountsGroup = new QActionGroup(this);
+    auto* accountsGroup = new QActionGroup(accountsButtonMenu);
 
     if (accounts->count() <= 0) {
         ui->actionNoAccountsAdded->setEnabled(false);
@@ -664,12 +678,11 @@ void MainWindow::repopulateAccountsMenu()
     } else {
         // TODO: Nicer way to iterate?
         for (int i = 0; i < accounts->count(); i++) {
-            MinecraftAccountPtr account = accounts->at(i);
+            auto account = accounts->at(i);
             auto profileLabel = profileInUseFilter(account->displayName(), account->isInUse());
-            QAction* action = new QAction(profileLabel, this);
+            auto* action = new QAction(profileLabel, accountsGroup);
             action->setData(i);
             action->setCheckable(true);
-            action->setActionGroup(accountsGroup);
             if (defaultAccount == account) {
                 action->setChecked(true);
             }
@@ -698,8 +711,6 @@ void MainWindow::repopulateAccountsMenu()
     ui->actionNoDefaultAccount->setActionGroup(accountsGroup);
 
     ui->accountsMenu->addAction(ui->actionNoDefaultAccount);
-
-    connect(ui->actionNoDefaultAccount, &QAction::triggered, this, &MainWindow::changeActiveAccount);
 
     ui->accountsMenu->addSeparator();
     ui->accountsMenu->addAction(ui->actionManageSkins);
@@ -812,24 +823,6 @@ void MainWindow::updateNewsLabel()
     }
 }
 
-QList<int> stringToIntList(const QString& string)
-{
-    QStringList split = string.split(',', Qt::SkipEmptyParts);
-    QList<int> out;
-    for (int i = 0; i < split.size(); ++i) {
-        out.append(split.at(i).toInt());
-    }
-    return out;
-}
-QString intListToString(const QList<int>& list)
-{
-    QStringList slist;
-    for (int i = 0; i < list.size(); ++i) {
-        slist.append(QString::number(list.at(i)));
-    }
-    return slist.join(',');
-}
-
 void MainWindow::onCatToggled(bool state)
 {
     setCatBackground(state);
@@ -853,6 +846,7 @@ void MainWindow::updateCatState()
     }
 
     ui->actionCAT->setVisible(catEnabled);
+    m_catSeparator->setVisible(catEnabled);
     ui->actionCAT->setChecked(catVisible);
     setCatBackground(catVisible);
 }
@@ -1224,16 +1218,14 @@ void MainWindow::on_actionChangeInstIcon_triggered()
         m_selectedInstance->setIconKey(dlg.selectedIconKey);
         auto icon = APPLICATION->icons()->getIcon(dlg.selectedIconKey);
         ui->actionChangeInstIcon->setIcon(icon);
-        changeIconButton->setIcon(icon);
+        m_changeIconButton->setIcon(icon);
     }
 }
 
 void MainWindow::iconUpdated(QString icon)
 {
     if (icon == m_currentInstIcon) {
-        auto new_icon = APPLICATION->icons()->getIcon(m_currentInstIcon);
-        ui->actionChangeInstIcon->setIcon(new_icon);
-        changeIconButton->setIcon(new_icon);
+        updateInstanceToolIcon(icon);
     }
 }
 
@@ -1242,7 +1234,7 @@ void MainWindow::updateInstanceToolIcon(QString new_icon)
     m_currentInstIcon = new_icon;
     auto icon = APPLICATION->icons()->getIcon(m_currentInstIcon);
     ui->actionChangeInstIcon->setIcon(icon);
-    changeIconButton->setIcon(icon);
+    m_changeIconButton->setIcon(icon);
 }
 
 void MainWindow::setSelectedInstanceById(const QString& id)
@@ -1285,6 +1277,32 @@ void MainWindow::deleteGroup(QString group)
                                             QMessageBox::Yes | QMessageBox::No);
     if (reply == QMessageBox::Yes)
         APPLICATION->instances()->deleteGroup(group);
+}
+
+void MainWindow::setGroupIcon(QString group)
+{
+    Q_ASSERT(!group.isEmpty());
+
+    InstanceList* instances = APPLICATION->instances();
+
+    IconPickerDialog dlg(this);
+    dlg.execWithSelection(instances->getGroupIconKey(group));
+
+    if (dlg.result() == QDialog::Accepted) {
+        instances->setGroupIconKey(group, dlg.selectedIconKey);
+        view->updateGeometries();
+        view->viewport()->update();
+    }
+}
+
+void MainWindow::removeGroupIcon(QString group)
+{
+    Q_ASSERT(!group.isEmpty());
+
+    InstanceList* instances = APPLICATION->instances();
+    instances->setGroupIconKey(group, "");
+    view->updateGeometries();
+    view->viewport()->update();
 }
 
 void MainWindow::renameGroup(QString group)
@@ -1367,6 +1385,11 @@ void MainWindow::on_actionViewJavaFolder_triggered()
     DesktopServices::openPath(APPLICATION->javaPath(), true);
 }
 
+void MainWindow::on_actionViewTemplateFolder_triggered()
+{
+    DesktopServices::openPath(APPLICATION->settings()->get("TemplateDir").toString(), true);
+}
+
 void MainWindow::refreshInstances()
 {
     APPLICATION->instances()->loadList();
@@ -1441,8 +1464,8 @@ void MainWindow::on_actionClearMetadata_triggered()
     // This if contains side effects!
     if (!APPLICATION->metacache()->evictAll()) {
         CustomMessageBox::selectable(this, tr("Error"),
-                                     tr("Metadata cache clear Failed!\nTo clear the metadata cache manually, press Folders -> View "
-                                        "Launcher Root Folder, and after closing the launcher delete the folder named \"meta\"\n"),
+                                     tr("Metadata cache clear Failed!\nTo clear the metadata cache manually, press Folders -> Launcher "
+                                        "Data, and after closing the launcher delete the folder named \"meta\"\n"),
                                      QMessageBox::Warning)
             ->show();
     }
@@ -1450,7 +1473,7 @@ void MainWindow::on_actionClearMetadata_triggered()
     APPLICATION->metacache()->SaveNow();
 }
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
 void MainWindow::on_actionAddToPATH_triggered()
 {
     auto binaryPath = APPLICATION->applicationFilePath();
@@ -1694,7 +1717,7 @@ void MainWindow::instanceChanged(const QModelIndex& current, [[maybe_unused]] co
 
         ui->actionKillInstance->setEnabled(m_selectedInstance->isRunning());
         ui->actionExportInstance->setEnabled(m_selectedInstance->canExport());
-        renameButton->setText(m_selectedInstance->name());
+        m_nameLabel->setText(m_selectedInstance->name());
         m_statusLeft->setText(m_selectedInstance->getStatusbarDescription());
         updateStatusCenter();
         updateInstanceToolIcon(m_selectedInstance->iconKey());
@@ -1736,8 +1759,8 @@ void MainWindow::selectionBad()
     ui->instanceToolBar->setEnabled(false);
     setInstanceActionsEnabled(false);
     updateLaunchButton();
-    renameButton->setText(tr("Rename Instance"));
-    updateInstanceToolIcon("grass");
+    m_nameLabel->setText(tr("No Instance Selected"));
+    updateInstanceToolIcon("default");
 
     // ...and then see if we can enable the previously selected instance
     setSelectedInstanceById(APPLICATION->settings()->get("SelectedInstance").toString());
@@ -1803,4 +1826,43 @@ void MainWindow::refreshCurrentInstance()
 {
     auto current = view->selectionModel()->currentIndex();
     instanceChanged(current, current);
+}
+
+void MainWindow::updateInstanceToolBarOrientation(Qt::Orientation orientation)
+{
+    ui->instanceToolBar->removeAction(ui->actionRenameInstance);
+    ui->instanceToolBar->removeAction(ui->actionChangeInstIcon);
+
+    if (orientation == Qt::Vertical) {
+        m_instanceInfoWidget->setVisible(true);
+    } else {
+        m_instanceInfoWidget->setVisible(false);
+        ui->instanceToolBar->insertActionBefore(m_instanceToolBarTopSeparator, ui->actionRenameInstance);
+        ui->instanceToolBar->insertActionBefore(m_instanceToolBarTopSeparator, ui->actionChangeInstIcon);
+    }
+    // HACK: sync size (no, I don't know why this works)
+    ui->instanceToolBar->resize(0, 0);
+}
+
+void MainWindow::handleInstanceRename(const QString& before, const QString& after)
+{
+    const auto newRoot = askToUpdateInstanceDirName(m_selectedInstance, before, after, this);
+    if (newRoot.isEmpty()) {
+        return;
+    }
+
+    auto oldID = m_selectedInstance->id();
+    auto newID = QFileInfo(newRoot).fileName();
+    QString origGroup(APPLICATION->instances()->getInstanceGroup(oldID));
+    bool syncGroup = origGroup != GroupId() && oldID != newID;
+    if (syncGroup) {
+        APPLICATION->instances()->setInstanceGroup(oldID, GroupId());
+    }
+
+    refreshInstances();
+    setSelectedInstanceById(newID);
+
+    if (syncGroup) {
+        APPLICATION->instances()->setInstanceGroup(newID, origGroup);
+    }
 }

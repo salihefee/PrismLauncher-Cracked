@@ -40,27 +40,25 @@
 
 #pragma once
 
-#include <memory>
-
 #include <QMainWindow>
 #include <QProcess>
 #include <QTimer>
 
 #include "minecraft/auth/MinecraftAccount.h"
 
+class EditableLabel;
 class LaunchController;
 class NewsChecker;
+class QLabel;
+class QTextEdit;
 class QToolButton;
 class InstanceProxyModel;
-class LabeledToolButton;
-class QLabel;
 class MinecraftInstance;
 class MinecraftLauncher;
 class BaseProfilerFactory;
 class InstanceView;
 class KonamiCode;
 class InstanceTask;
-class LabeledToolButton;
 
 namespace Ui {
 class MainWindow;
@@ -119,6 +117,7 @@ class MainWindow : public QMainWindow {
     void on_actionViewIconsFolder_triggered();
     void on_actionViewLogsFolder_triggered();
     void on_actionViewJavaFolder_triggered();
+    void on_actionViewTemplateFolder_triggered();
 
     void on_actionViewSkinsFolder_triggered();
 
@@ -138,7 +137,7 @@ class MainWindow : public QMainWindow {
 
     void on_actionClearMetadata_triggered();
 
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     void on_actionAddToPATH_triggered();
 #endif
 
@@ -153,6 +152,9 @@ class MainWindow : public QMainWindow {
     void on_actionKillInstance_triggered();
 
     void on_actionDeleteInstance_triggered();
+
+    void setGroupIcon(QString group);
+    void removeGroupIcon(QString group);
 
     void deleteGroup(QString group);
     void renameGroup(QString group);
@@ -212,7 +214,7 @@ class MainWindow : public QMainWindow {
 
     void lockToolbars(bool);
 
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
     void keyReleaseEvent(QKeyEvent* event) override;
 #endif
 
@@ -220,6 +222,8 @@ class MainWindow : public QMainWindow {
 
    private:
     void retranslateUi();
+
+    void updateInstanceToolBarOrientation(Qt::Orientation orientation);
 
     void addInstance(const QString& url = QString(), const QMap<QString, QString>& extra_info = {});
     void setCatBackground(bool enabled);
@@ -232,6 +236,8 @@ class MainWindow : public QMainWindow {
     void runModalTask(Task* task);
     void instanceFromInstanceTask(InstanceTask* task);
 
+    void handleInstanceRename(const QString& before, const QString& after);
+
    private:
     Ui::MainWindow* ui;
     // these are managed by Qt's memory management model!
@@ -240,8 +246,11 @@ class MainWindow : public QMainWindow {
     QToolButton* newsLabel = nullptr;
     QLabel* m_statusLeft = nullptr;
     QLabel* m_statusCenter = nullptr;
-    LabeledToolButton* changeIconButton = nullptr;
-    LabeledToolButton* renameButton = nullptr;
+    QToolButton* m_changeIconButton = nullptr;
+    QAction* m_instanceToolBarTopSeparator = nullptr;
+    QAction* m_instanceInfoWidget = nullptr;
+    QAction* m_catSeparator = nullptr;
+    EditableLabel* m_nameLabel = nullptr;
     QToolButton* helpMenuButton = nullptr;
     KonamiCode* secretEventFilter = nullptr;
 

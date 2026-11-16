@@ -192,9 +192,8 @@ void ResourceFolderModel::installResourceWithFlameMetadata(const QString& path, 
         auto [job, response] = FlameAPI::get().getProjectTask(vers.addonId.toString());
         connect(job.get(), &Task::failed, this, install);
         connect(job.get(), &Task::aborted, this, install);
-        connect(job.get(), &Task::succeeded, this, [response, this, &vers, install, &pack] {
-            pack = *response;
-            LocalResourceUpdateTask updateMetadata(indexDir(), pack, vers);
+        connect(job.get(), &Task::succeeded, this, [response, this, vers, install, pack] {
+            LocalResourceUpdateTask updateMetadata(indexDir(), *response, vers);
             connect(&updateMetadata, &Task::finished, this, install);
             updateMetadata.start();
         });
@@ -564,13 +563,13 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
                 if (at(row).isSymLinkUnder(instDirPath())) {
                     tooltip +=
                         m_resources[row]->internalId() +
-                        tr("\nWarning: This resource is symbolically linked from elsewhere. Editing it will also change the original."
+                        tr("\nThis resource is symbolically linked from elsewhere. Editing it will also change the original."
                            "\nCanonical Path: %1")
                             .arg(at(row).fileinfo().canonicalFilePath());
                 }
 
                 if (at(row).isMoreThanOneHardLink()) {
-                    tooltip += tr("\nWarning: This resource is hard linked elsewhere. Editing it will also change the original.");
+                    tooltip += tr("\nThis resource is hard linked elsewhere. Editing it will also change the original.");
                 }
             }
 
@@ -582,16 +581,14 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
                 result.setValue(icons(row));
                 return result;
             }
+            if (column == VersionColumn && at(row).lockUpdate()) {
+                return QIcon::fromTheme("status-locked");
+            }
             return {};
         }
         case Qt::CheckStateRole:
             if (column == ActiveColumn) {
                 return m_resources[row]->enabled() ? Qt::Checked : Qt::Unchecked;
-            }
-            return {};
-        case Qt::UserRole:
-            if (column == LockUpdateColumn) {
-                return at(row).lockUpdate();
             }
             return {};
         case Qt::SizeHintRole:
@@ -614,7 +611,7 @@ QList<MultiDecorationItemDelegate::Icon> ResourceFolderModel::icons(int row) con
     }
 
     if (at(row).isSymLinkUnder(instDirPath()) || at(row).isMoreThanOneHardLink()) {
-        result.append({ .icon = QIcon::fromTheme("status-yellow"), .size = s_iconSize });
+        result.append({ .icon = QIcon::fromTheme("status-linked"), .size = s_iconSize });
     }
 
     return result;
@@ -649,7 +646,6 @@ QVariant ResourceFolderModel::headerData(int section, [[maybe_unused]] Qt::Orien
                 case ProviderColumn:
                 case SizeColumn:
                 case FileNameColumn:
-                case LockUpdateColumn:
                     return columnNames().at(section);
                 default:
                     return {};
@@ -672,8 +668,6 @@ QVariant ResourceFolderModel::headerData(int section, [[maybe_unused]] Qt::Orien
                     return tr("The size of the resource.");
                 case FileNameColumn:
                     return tr("The file name of the resource.");
-                case LockUpdateColumn:
-                    return tr("Should this mod be updated?");
                 default:
                     return {};
             }
@@ -848,6 +842,7 @@ QMenu* ResourceFolderModel::createHeaderContextMenu(QTreeView* tree)
                 }
             }
             tree->header()->blockSignals(false);
+            tree->doItemsLayout();
             saveColumns(tree);
         });
 
@@ -969,7 +964,7 @@ void ResourceFolderModel::applyUpdates(QSet<QString>& currentSet, QSet<QString>&
             }
 
             m_resources[row].swap(newResource);
-            newResource->updateIssues(m_instance);
+            m_resources[row]->updateIssues(m_instance);
 
             resolveResource(m_resources.at(row));
             emit dataChanged(index(row, 0), index(row, columnCount(QModelIndex()) - 1));
@@ -1076,9 +1071,9 @@ bool ResourceFolderModel::setUpdateLock(const QModelIndexList& indexes, EnableAc
     }
 
     bool succeeded = true;
-    auto updateColumn = static_cast<int>(columnNames(false).indexOf("Update"));
+    auto versionColumn = static_cast<int>(columnNames(false).indexOf("Version"));
     for (const auto& idx : indexes) {
-        if (!validateIndex(idx) || idx.column() != updateColumn) {
+        if (!validateIndex(idx) || idx.column() != 0) {
             continue;
         }
 
@@ -1109,7 +1104,10 @@ bool ResourceFolderModel::setUpdateLock(const QModelIndexList& indexes, EnableAc
             meta->lockUpdate = lockUpdate;
             Metadata::update(indexDir(), *meta.get());
             resource->setMetadata(*meta.get());
-            emit dataChanged(index(row, updateColumn), index(row, columnCount(QModelIndex()) - 1));
+
+            if (versionColumn != -1) {
+                emit dataChanged(index(row, versionColumn), index(row, versionColumn));
+            }
         }
     }
 

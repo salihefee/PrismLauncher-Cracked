@@ -66,8 +66,6 @@ class ModpackListModel : public QAbstractListModel {
     auto data(const QModelIndex& index, int role) const -> QVariant override;
     bool setData(const QModelIndex& index, const QVariant& value, int role) override;
 
-    void setActiveJob(NetJob::Ptr ptr) { m_jobPtr = ptr; }
-
     /* Ask the API for more information */
     void fetchMore(const QModelIndex& parent) override;
     void refresh();
@@ -84,7 +82,7 @@ class ModpackListModel : public QAbstractListModel {
     };
 
    public slots:
-    void searchRequestFinished(QList<ModPlatform::IndexedPack::Ptr>& newList);
+    void searchRequestFinished(const QList<ModPlatform::IndexedPack>& newList);
     void searchRequestFailed(const QString& reason, int networkErrorCode);
     void searchRequestForOneSucceeded(ModPlatform::IndexedPack::Ptr);
 
@@ -97,8 +95,6 @@ class ModpackListModel : public QAbstractListModel {
 
    protected:
     void requestLogo(const QString& logo, const QString& url);
-
-    inline auto getMineVersions() const -> std::vector<Version>;
 
    protected:
     ModrinthPage* m_parent;

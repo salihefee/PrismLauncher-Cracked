@@ -80,7 +80,7 @@ const BaseVersion::Ptr JavaInstallList::at(int i) const
     return m_vlist.at(i);
 }
 
-bool JavaInstallList::isLoaded()
+bool JavaInstallList::isLoaded() const
 {
     return m_status == JavaInstallList::Status::Done;
 }
@@ -114,6 +114,8 @@ QVariant JavaInstallList::data(const QModelIndex& index, int role) const
             return version->path;
         case CPUArchitectureRole:
             return version->arch;
+        case JavaMajorRole:
+            return QString::number(version->id.major());
         default:
             return QVariant();
     }
