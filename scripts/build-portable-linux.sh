@@ -62,16 +62,18 @@ export ARTIFACT_NAME="Linux-Qt6"
 export BUILD_PLATFORM="offline-local"
 
 echo "Configuring $BUILD_TYPE x86-64 build..."
-cmake --preset linux \
+cmake --preset default \
   -D VCPKG_HOST_TRIPLET=x64-linux \
-  -D VCPKG_TARGET_TRIPLET=x64-linux
+  -D VCPKG_TARGET_TRIPLET=x64-linux \
+  -D Launcher_BUILD_ARTIFACT="$ARTIFACT_NAME" \
+  -D Launcher_BUILD_PLATFORM="$BUILD_PLATFORM"
 
 echo "Building with $JOBS parallel jobs..."
-cmake --build --preset linux --config "$BUILD_TYPE" --parallel "$JOBS"
+cmake --build --preset default --config "$BUILD_TYPE" --parallel "$JOBS"
 
 if [[ "$RUN_TESTS" == "1" ]]; then
   echo "Running tests..."
-  ctest --preset linux --build-config "$BUILD_TYPE"
+  ctest --preset default --build-config "$BUILD_TYPE"
 fi
 
 SHORT_REVISION="$(git rev-parse --short HEAD)"

@@ -70,22 +70,22 @@ jobs:
           }
 
           if selected "$LINUX_X64"; then
-            entries=$(jq -c '. + [{"os":"ubuntu-24.04","artifact-name":"Linux","cmake-preset":"linux","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"ubuntu-24.04","artifact-name":"Linux","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
           fi
           if selected "$LINUX_ARM64"; then
-            entries=$(jq -c '. + [{"os":"ubuntu-24.04-arm","artifact-name":"Linux-aarch64","cmake-preset":"linux","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"ubuntu-24.04-arm","artifact-name":"Linux-aarch64","msystem":"","vcvars-arch":"","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
           fi
           if selected "$WINDOWS_MINGW_X64"; then
-            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MinGW-w64","cmake-preset":"windows_mingw","msystem":"CLANG64","vcvars-arch":"amd64_x86","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MinGW-w64","msystem":"CLANG64","vcvars-arch":"amd64_x86","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
           fi
           if selected "$WINDOWS_MSVC_X64"; then
-            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MSVC","cmake-preset":"windows_msvc","msystem":"","vcvars-arch":"amd64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"windows-2022","artifact-name":"Windows-MSVC","msystem":"","vcvars-arch":"amd64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
           fi
           if selected "$WINDOWS_MSVC_ARM64"; then
-            entries=$(jq -c '. + [{"os":"windows-11-arm","artifact-name":"Windows-MSVC-arm64","cmake-preset":"windows_msvc","msystem":"","vcvars-arch":"arm64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"windows-11-arm","artifact-name":"Windows-MSVC-arm64","msystem":"","vcvars-arch":"arm64","macosx-deployment-target":"","qt-version":"6.11.2"}]' <<< "$entries")
           fi
           if selected "$MACOS_UNIVERSAL"; then
-            entries=$(jq -c '. + [{"os":"macos-26","artifact-name":"macOS","cmake-preset":"macos_universal","msystem":"","vcvars-arch":"","macosx-deployment-target":"13.0","qt-version":"6.11.2"}]' <<< "$entries")
+            entries=$(jq -c '. + [{"os":"macos-26","artifact-name":"macOS","msystem":"","vcvars-arch":"","macosx-deployment-target":"13.0","qt-version":"6.11.2"}]' <<< "$entries")
           fi
 
           if [[ "$entries" == '[]' ]]; then
@@ -118,7 +118,8 @@ jobs:
       ARTIFACT_NAME: ${{ matrix.artifact-name }}-Qt6
       BUILD_PLATFORM: offline-nightly
       BUILD_TYPE: ${{ inputs.build-type || 'Release' }}
-      CMAKE_PRESET: ${{ matrix.cmake-preset }}
+      CMAKE_PRESET: ci
+      CMAKE_OSX_ARCHITECTURES: x86_64;arm64
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx-deployment-target }}
 
     steps:
